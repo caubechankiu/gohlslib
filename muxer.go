@@ -65,6 +65,8 @@ type Muxer struct {
 	// than saving them on RAM, but allows to preserve RAM.
 	Directory string
 
+	PathName string
+
 	//
 	// private
 	//
@@ -73,8 +75,6 @@ type Muxer struct {
 	server         *muxerServer
 	segmenter      muxerSegmenter
 	forceSwitch    bool
-
-	pathName string
 }
 
 // Start initializes the muxer.
@@ -136,7 +136,7 @@ func (m *Muxer) Start() error {
 		m.VideoTrack,
 		m.AudioTrack,
 		m.storageFactory,
-		m.pathName,
+		m.PathName,
 	)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (m *Muxer) Start() error {
 			m.AudioTrack,
 			m.storageFactory,
 			m.server.onSegmentFinalized,
-			m.pathName,
+			m.PathName,
 		)
 	} else {
 		m.segmenter = newMuxerSegmenterFMP4(
@@ -163,7 +163,7 @@ func (m *Muxer) Start() error {
 			m.storageFactory,
 			m.server.onSegmentFinalized,
 			m.server.onPartFinalized,
-			m.pathName,
+			m.PathName,
 		)
 	}
 
