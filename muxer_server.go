@@ -94,6 +94,7 @@ type muxerServer struct {
 	nextSegmentParts   []*muxerPart
 	nextPartID         uint64
 	init               storage.File
+	pathName           string
 }
 
 func newMuxerServer(
@@ -102,6 +103,7 @@ func newMuxerServer(
 	videoTrack *Track,
 	audioTrack *Track,
 	storageFactory storage.Factory,
+	pathName string,
 ) (*muxerServer, error) {
 	s := &muxerServer{
 		variant:        variant,
@@ -111,6 +113,7 @@ func newMuxerServer(
 		storageFactory: storageFactory,
 		segmentsByName: make(map[string]muxerSegment),
 		partsByName:    make(map[string]*muxerPart),
+		pathName:       pathName,
 	}
 
 	s.cond = sync.NewCond(&s.mutex)
@@ -177,7 +180,8 @@ func (s *muxerServer) hasPart(segmentID uint64, partID uint64) bool {
 		return true
 	}
 
-	if segmentID != s.nextSegmentID {
+	// if segmentID != s.nextSegmentID {
+	if segmentID != segmentIDMap[s.pathName] {
 		return false
 	}
 
@@ -345,7 +349,8 @@ func (s *muxerServer) handleMediaPlaylist(msn string, part string, skip string, 
 				// exceeds the last Partial Segment in the current Playlist by the
 				// Advance Part Limit, then the server SHOULD immediately return Bad
 				// Request, such as HTTP 400.
-				if msnint > (s.nextSegmentID + 1) {
+				// if msnint > (s.nextSegmentID + 1) {
+				if msnint > (segmentIDMap[s.pathName] + 1) {
 					w.WriteHeader(http.StatusBadRequest)
 					return nil
 				}
@@ -679,7 +684,8 @@ func (s *muxerServer) onSegmentFinalized(segment muxerSegment) {
 		s.segments = append(s.segments, segment)
 
 		if seg, ok := segment.(*muxerSegmentFMP4); ok {
-			s.nextSegmentID = seg.id + 1
+			// s.nextSegmentID = seg.id + 1
+			segmentIDMap[s.pathName] = seg.id + 1
 		}
 
 		s.nextSegmentParts = s.nextSegmentParts[:0]

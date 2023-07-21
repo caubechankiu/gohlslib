@@ -110,6 +110,7 @@ type muxerSegmenterFMP4 struct {
 	firstSegmentFinalized          bool
 	sampleDurations                map[time.Duration]struct{}
 	adjustedPartDuration           time.Duration
+	pathName                       string
 }
 
 func newMuxerSegmenterFMP4(
@@ -122,6 +123,7 @@ func newMuxerSegmenterFMP4(
 	factory storage.Factory,
 	onSegmentFinalized func(muxerSegment),
 	onPartFinalized func(*muxerPart),
+	pathName string,
 ) *muxerSegmenterFMP4 {
 	m := &muxerSegmenterFMP4{
 		lowLatency:         lowLatency,
@@ -134,6 +136,7 @@ func newMuxerSegmenterFMP4(
 		onSegmentFinalized: onSegmentFinalized,
 		onPartFinalized:    onPartFinalized,
 		sampleDurations:    make(map[time.Duration]struct{}),
+		pathName:           pathName,
 	}
 
 	if audioTrack != nil {
@@ -142,7 +145,10 @@ func newMuxerSegmenterFMP4(
 
 	// add initial gaps, required by iOS LL-HLS
 	if m.lowLatency {
-		m.nextSegmentID = 7
+		// m.nextSegmentID = 7
+		if segmentIDMap[m.pathName] == 0 {
+			segmentIDMap[m.pathName] = 7
+		}
 	}
 
 	return m
@@ -156,8 +162,10 @@ func (m *muxerSegmenterFMP4) close() {
 }
 
 func (m *muxerSegmenterFMP4) genSegmentID() uint64 {
-	id := m.nextSegmentID
-	m.nextSegmentID++
+	// id := m.nextSegmentID
+	id := segmentIDMap[m.pathName]
+	// m.nextSegmentID++
+	segmentIDMap[m.pathName]++
 	return id
 }
 

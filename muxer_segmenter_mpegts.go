@@ -51,6 +51,7 @@ type muxerSegmenterMPEGTS struct {
 	videoDTSExtractor *h264.DTSExtractor
 	startPCR          time.Time
 	startDTS          time.Duration
+	pathName          string
 }
 
 func newMuxerSegmenterMPEGTS(
@@ -60,6 +61,7 @@ func newMuxerSegmenterMPEGTS(
 	audioTrack *Track,
 	factory storage.Factory,
 	onSegmentReady func(muxerSegment),
+	pathName string,
 ) *muxerSegmenterMPEGTS {
 	m := &muxerSegmenterMPEGTS{
 		segmentDuration: segmentDuration,
@@ -68,6 +70,7 @@ func newMuxerSegmenterMPEGTS(
 		audioTrack:      audioTrack,
 		factory:         factory,
 		onSegmentReady:  onSegmentReady,
+		pathName:        pathName,
 	}
 
 	m.writer = mpegts.NewWriter(
@@ -85,8 +88,10 @@ func (m *muxerSegmenterMPEGTS) close() {
 }
 
 func (m *muxerSegmenterMPEGTS) genSegmentID() uint64 {
-	id := m.nextSegmentID
-	m.nextSegmentID++
+	// id := m.nextSegmentID
+	id := segmentIDMap[m.pathName]
+	// m.nextSegmentID++
+	segmentIDMap[m.pathName]++
 	return id
 }
 

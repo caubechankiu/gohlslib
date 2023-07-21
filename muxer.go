@@ -13,6 +13,8 @@ import (
 	"github.com/bluenviron/gohlslib/pkg/storage"
 )
 
+var segmentIDMap map[string]uint64 = map[string]uint64{}
+
 // MuxerVariant is a muxer variant.
 type MuxerVariant int
 
@@ -71,6 +73,8 @@ type Muxer struct {
 	server         *muxerServer
 	segmenter      muxerSegmenter
 	forceSwitch    bool
+
+	pathName string
 }
 
 // Start initializes the muxer.
@@ -132,6 +136,7 @@ func (m *Muxer) Start() error {
 		m.VideoTrack,
 		m.AudioTrack,
 		m.storageFactory,
+		m.pathName,
 	)
 	if err != nil {
 		return err
@@ -145,6 +150,7 @@ func (m *Muxer) Start() error {
 			m.AudioTrack,
 			m.storageFactory,
 			m.server.onSegmentFinalized,
+			m.pathName,
 		)
 	} else {
 		m.segmenter = newMuxerSegmenterFMP4(
@@ -157,6 +163,7 @@ func (m *Muxer) Start() error {
 			m.storageFactory,
 			m.server.onSegmentFinalized,
 			m.server.onPartFinalized,
+			m.pathName,
 		)
 	}
 
