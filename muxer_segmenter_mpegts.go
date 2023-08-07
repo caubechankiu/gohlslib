@@ -2,6 +2,7 @@ package gohlslib
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/bluenviron/mediacommon/pkg/codecs/h264"
@@ -15,26 +16,12 @@ const (
 	mpegtsSegmentMinAUCount = 100
 )
 
-func trackHLSToMPEGTS(t *Track) *mpegts.Track {
-	if t == nil {
-		return nil
-	}
+type switchableWriter struct {
+	w io.Writer
+}
 
-	switch tcodec := t.Codec.(type) {
-	case *codecs.H264:
-		return &mpegts.Track{
-			Codec: &mpegts.CodecH264{},
-		}
-
-	case *codecs.MPEG4Audio:
-		return &mpegts.Track{
-			Codec: &mpegts.CodecMPEG4Audio{
-				Config: tcodec.Config,
-			},
-		}
-	}
-
-	return nil
+func (w *switchableWriter) Write(p []byte) (int, error) {
+	return w.w.Write(p)
 }
 
 type muxerSegmenterMPEGTS struct {
@@ -42,14 +29,17 @@ type muxerSegmenterMPEGTS struct {
 	segmentMaxSize  uint64
 	videoTrack      *Track
 	audioTrack      *Track
+	prefix          string
 	factory         storage.Factory
 	onSegmentReady  func(muxerSegment)
 
+	writerVideoTrack  *mpegts.Track
+	writerAudioTrack  *mpegts.Track
+	switchableWriter  *switchableWriter
 	writer            *mpegts.Writer
 	nextSegmentID     uint64
 	currentSegment    *muxerSegmentMPEGTS
 	videoDTSExtractor *h264.DTSExtractor
-	startPCR          time.Time
 	startDTS          time.Duration
 	pathName          string
 }
@@ -59,6 +49,7 @@ func newMuxerSegmenterMPEGTS(
 	segmentMaxSize uint64,
 	videoTrack *Track,
 	audioTrack *Track,
+	prefix string,
 	factory storage.Factory,
 	onSegmentReady func(muxerSegment),
 	pathName string,
@@ -68,14 +59,31 @@ func newMuxerSegmenterMPEGTS(
 		segmentMaxSize:  segmentMaxSize,
 		videoTrack:      videoTrack,
 		audioTrack:      audioTrack,
+		prefix:          prefix,
 		factory:         factory,
 		onSegmentReady:  onSegmentReady,
 		pathName:        pathName,
 	}
 
-	m.writer = mpegts.NewWriter(
-		trackHLSToMPEGTS(videoTrack),
-		trackHLSToMPEGTS(audioTrack))
+	var tracks []*mpegts.Track
+
+	if videoTrack != nil {
+		m.writerVideoTrack = &mpegts.Track{
+			Codec: codecs.ToMPEGTS(videoTrack.Codec),
+		}
+		tracks = append(tracks, m.writerVideoTrack)
+	}
+
+	if audioTrack != nil {
+		m.writerAudioTrack = &mpegts.Track{
+			Codec: codecs.ToMPEGTS(audioTrack.Codec),
+		}
+		tracks = append(tracks, m.writerAudioTrack)
+	}
+
+	m.switchableWriter = &switchableWriter{}
+
+	m.writer = mpegts.NewWriter(m.switchableWriter, tracks)
 
 	return m
 }
@@ -93,6 +101,26 @@ func (m *muxerSegmenterMPEGTS) genSegmentID() uint64 {
 	// m.nextSegmentID++
 	segmentIDMap[m.pathName]++
 	return id
+}
+
+func (m *muxerSegmenterMPEGTS) writeAV1(
+	_ time.Time,
+	_ time.Duration,
+	_ [][]byte,
+	_ bool,
+	_ bool,
+) error {
+	return fmt.Errorf("unimplemented")
+}
+
+func (m *muxerSegmenterMPEGTS) writeVP9(
+	_ time.Time,
+	_ time.Duration,
+	_ []byte,
+	_ bool,
+	_ bool,
+) error {
+	return fmt.Errorf("unimplemented")
 }
 
 func (m *muxerSegmenterMPEGTS) writeH26x(
@@ -118,7 +146,6 @@ func (m *muxerSegmenterMPEGTS) writeH26x(
 			return fmt.Errorf("unable to extract DTS: %v", err)
 		}
 
-		m.startPCR = ntp
 		m.startDTS = dts
 		dts = 0
 		pts -= m.startDTS
@@ -128,8 +155,11 @@ func (m *muxerSegmenterMPEGTS) writeH26x(
 			m.genSegmentID(),
 			ntp,
 			m.segmentMaxSize,
-			m.videoTrack != nil,
+			m.writerVideoTrack,
+			m.writerAudioTrack,
+			m.switchableWriter,
 			m.writer,
+			m.prefix,
 			m.factory)
 		if err != nil {
 			return err
@@ -156,8 +186,11 @@ func (m *muxerSegmenterMPEGTS) writeH26x(
 				m.genSegmentID(),
 				ntp,
 				m.segmentMaxSize,
-				m.videoTrack != nil,
+				m.writerVideoTrack,
+				m.writerAudioTrack,
+				m.switchableWriter,
 				m.writer,
+				m.prefix,
 				m.factory,
 			)
 			if err != nil {
@@ -167,9 +200,8 @@ func (m *muxerSegmenterMPEGTS) writeH26x(
 	}
 
 	err := m.currentSegment.writeH264(
-		ntp.Sub(m.startPCR),
-		dts,
 		pts,
+		dts,
 		randomAccessPresent,
 		au)
 	if err != nil {
@@ -179,10 +211,13 @@ func (m *muxerSegmenterMPEGTS) writeH26x(
 	return nil
 }
 
-func (m *muxerSegmenterMPEGTS) writeAudio(ntp time.Time, pts time.Duration, au []byte) error {
+func (m *muxerSegmenterMPEGTS) writeOpus(_ time.Time, _ time.Duration, _ [][]byte) error {
+	return fmt.Errorf("unimplemented")
+}
+
+func (m *muxerSegmenterMPEGTS) writeMPEG4Audio(ntp time.Time, pts time.Duration, aus [][]byte) error {
 	if m.videoTrack == nil {
 		if m.currentSegment == nil {
-			m.startPCR = ntp
 			m.startDTS = pts
 			pts = 0
 
@@ -192,8 +227,11 @@ func (m *muxerSegmenterMPEGTS) writeAudio(ntp time.Time, pts time.Duration, au [
 				m.genSegmentID(),
 				ntp,
 				m.segmentMaxSize,
-				m.videoTrack != nil,
+				m.writerVideoTrack,
+				m.writerAudioTrack,
+				m.switchableWriter,
 				m.writer,
+				m.prefix,
 				m.factory,
 			)
 			if err != nil {
@@ -213,8 +251,11 @@ func (m *muxerSegmenterMPEGTS) writeAudio(ntp time.Time, pts time.Duration, au [
 					m.genSegmentID(),
 					ntp,
 					m.segmentMaxSize,
-					m.videoTrack != nil,
+					m.writerVideoTrack,
+					m.writerAudioTrack,
+					m.switchableWriter,
 					m.writer,
+					m.prefix,
 					m.factory,
 				)
 				if err != nil {
@@ -231,7 +272,7 @@ func (m *muxerSegmenterMPEGTS) writeAudio(ntp time.Time, pts time.Duration, au [
 		pts -= m.startDTS
 	}
 
-	err := m.currentSegment.writeAAC(ntp.Sub(m.startPCR), pts, au)
+	err := m.currentSegment.writeMPEG4Audio(pts, aus)
 	if err != nil {
 		return err
 	}

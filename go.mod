@@ -3,15 +3,15 @@ module github.com/bluenviron/gohlslib
 go 1.18
 
 require (
-	github.com/abema/go-mp4 v0.10.1
 	github.com/aler9/writerseeker v0.0.0-20220601075008-6f0e685b9c82
-	github.com/asticode/go-astits v1.11.0
-	github.com/bluenviron/mediacommon v0.5.1
+	github.com/asticode/go-astits v1.12.0
+	github.com/bluenviron/mediacommon v0.7.1-0.20230806181841-a2766dec314f
 	github.com/gin-gonic/gin v1.9.1
 	github.com/stretchr/testify v1.8.4
 )
 
 require (
+	github.com/abema/go-mp4 v0.11.0 // indirect
 	github.com/asticode/go-astikit v0.30.0 // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect

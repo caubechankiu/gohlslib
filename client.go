@@ -16,10 +16,40 @@ import (
 const (
 	clientMPEGTSEntryQueueSize        = 100
 	clientFMP4MaxPartTracksPerSegment = 200
-	clientLiveStartingInvPosition     = 3
-	clientLiveMaxInvPosition          = 5
+	clientLiveInitialDistance         = 3
+	clientLiveMaxDistanceFromEnd      = 5
 	clientMaxDTSRTCDiff               = 10 * time.Second
 )
+
+// ClientOnDownloadPrimaryPlaylistFunc is the prototype of Client.OnDownloadPrimaryPlaylist.
+type ClientOnDownloadPrimaryPlaylistFunc func(url string)
+
+// ClientOnDownloadStreamPlaylistFunc is the prototype of Client.OnDownloadStreamPlaylist.
+type ClientOnDownloadStreamPlaylistFunc func(url string)
+
+// ClientOnDownloadSegmentFunc is the prototype of Client.OnDownloadSegment.
+type ClientOnDownloadSegmentFunc func(url string)
+
+// ClientOnDecodeErrorFunc is the prototype of Client.OnDecodeError.
+type ClientOnDecodeErrorFunc func(err error)
+
+// ClientOnTracksFunc is the prototype of the function passed to OnTracks().
+type ClientOnTracksFunc func([]*Track) error
+
+// ClientOnDataAV1Func is the prototype of the function passed to OnDataAV1().
+type ClientOnDataAV1Func func(pts time.Duration, obus [][]byte)
+
+// ClientOnDataVP9Func is the prototype of the function passed to OnDataVP9().
+type ClientOnDataVP9Func func(pts time.Duration, frame []byte)
+
+// ClientOnDataH26xFunc is the prototype of the function passed to OnDataH26x().
+type ClientOnDataH26xFunc func(pts time.Duration, dts time.Duration, au [][]byte)
+
+// ClientOnDataMPEG4AudioFunc is the prototype of the function passed to OnDataMPEG4Audio().
+type ClientOnDataMPEG4AudioFunc func(pts time.Duration, aus [][]byte)
+
+// ClientOnDataOpusFunc is the prototype of the function passed to OnDataOpus().
+type ClientOnDataOpusFunc func(pts time.Duration, packets [][]byte)
 
 func clientAbsoluteURL(base *url.URL, relative string) (*url.URL, error) {
 	u, err := url.Parse(relative)
@@ -32,16 +62,25 @@ func clientAbsoluteURL(base *url.URL, relative string) (*url.URL, error) {
 // Client is a HLS client.
 type Client struct {
 	//
-	// Parameters (all optional except URI)
+	// parameters (all optional except URI)
 	//
 	// URI of the playlist.
 	URI string
 	// HTTP client.
 	// It defaults to http.DefaultClient.
 	HTTPClient *http.Client
-	// function that receives log messages.
-	// It defaults to log.Printf.
-	Log LogFunc
+
+	//
+	// callbacks (all optional)
+	//
+	// called before downloading a primary playlist.
+	OnDownloadPrimaryPlaylist ClientOnDownloadPrimaryPlaylistFunc
+	// called before downloading a stream playlist.
+	OnDownloadStreamPlaylist ClientOnDownloadStreamPlaylistFunc
+	// called before downloading a segment.
+	OnDownloadSegment ClientOnDownloadSegmentFunc
+	// called when a non-fatal decode error occurs.
+	OnDecodeError ClientOnDecodeErrorFunc
 
 	//
 	// private
@@ -49,8 +88,8 @@ type Client struct {
 
 	ctx         context.Context
 	ctxCancel   func()
-	onTracks    func([]*Track) error
-	onData      map[*Track]func(time.Duration, interface{})
+	onTracks    ClientOnTracksFunc
+	onData      map[*Track]interface{}
 	playlistURL *url.URL
 
 	// out
@@ -62,8 +101,17 @@ func (c *Client) Start() error {
 	if c.HTTPClient == nil {
 		c.HTTPClient = http.DefaultClient
 	}
-	if c.Log == nil {
-		c.Log = defaultLog
+	if c.OnDownloadPrimaryPlaylist == nil {
+		c.OnDownloadPrimaryPlaylist = func(_ string) {}
+	}
+	if c.OnDownloadStreamPlaylist == nil {
+		c.OnDownloadStreamPlaylist = func(_ string) {}
+	}
+	if c.OnDownloadSegment == nil {
+		c.OnDownloadSegment = func(_ string) {}
+	}
+	if c.OnDecodeError == nil {
+		c.OnDecodeError = func(_ error) {}
 	}
 
 	var err error
@@ -74,7 +122,7 @@ func (c *Client) Start() error {
 
 	c.ctx, c.ctxCancel = context.WithCancel(context.Background())
 
-	c.onData = make(map[*Track]func(time.Duration, interface{}))
+	c.onData = make(map[*Track]interface{})
 	c.outErr = make(chan error, 1)
 
 	go c.run()
@@ -93,12 +141,32 @@ func (c *Client) Wait() chan error {
 }
 
 // OnTracks sets a callback that is called when tracks are read.
-func (c *Client) OnTracks(cb func([]*Track) error) {
+func (c *Client) OnTracks(cb ClientOnTracksFunc) {
 	c.onTracks = cb
 }
 
-// OnData sets a callback that is called when data arrives.
-func (c *Client) OnData(forma *Track, cb func(time.Duration, interface{})) {
+// OnDataAV1 sets a callback that is called when data from an AV1 track is received.
+func (c *Client) OnDataAV1(forma *Track, cb ClientOnDataAV1Func) {
+	c.onData[forma] = cb
+}
+
+// OnDataVP9 sets a callback that is called when data from a VP9 track is received.
+func (c *Client) OnDataVP9(forma *Track, cb ClientOnDataVP9Func) {
+	c.onData[forma] = cb
+}
+
+// OnDataH26x sets a callback that is called when data from an H26x track is received.
+func (c *Client) OnDataH26x(forma *Track, cb ClientOnDataH26xFunc) {
+	c.onData[forma] = cb
+}
+
+// OnDataMPEG4Audio sets a callback that is called when data from a MPEG-4 Audio track is received.
+func (c *Client) OnDataMPEG4Audio(forma *Track, cb ClientOnDataMPEG4AudioFunc) {
+	c.onData[forma] = cb
+}
+
+// OnDataOpus sets a callback that is called when data from an Opus track is received.
+func (c *Client) OnDataOpus(forma *Track, cb ClientOnDataOpusFunc) {
 	c.onData[forma] = cb
 }
 
@@ -112,7 +180,10 @@ func (c *Client) runInner() error {
 	dl := newClientDownloaderPrimary(
 		c.playlistURL,
 		c.HTTPClient,
-		c.Log,
+		c.OnDownloadPrimaryPlaylist,
+		c.OnDownloadStreamPlaylist,
+		c.OnDownloadSegment,
+		c.OnDecodeError,
 		rp,
 		c.onTracks,
 		c.onData,

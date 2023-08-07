@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bluenviron/gohlslib/pkg/fmp4"
 	"github.com/bluenviron/gohlslib/pkg/storage"
+	"github.com/bluenviron/mediacommon/pkg/formats/fmp4"
 )
 
-func fmp4PartName(id uint64) string {
-	return "part" + strconv.FormatUint(id, 10)
+func partName(prefix string, id uint64) string {
+	return prefix + "_part" + strconv.FormatUint(id, 10) + ".mp4"
 }
 
 type muxerPart struct {
@@ -21,6 +21,7 @@ type muxerPart struct {
 	id                  uint64
 	storage             storage.Part
 
+	name                string
 	isIndependent       bool
 	videoSamples        []*fmp4.PartSample
 	audioSamples        []*fmp4.PartSample
@@ -36,6 +37,7 @@ func newMuxerPart(
 	videoTrack *Track,
 	audioTrack *Track,
 	audioTrackTimeScale uint32,
+	prefix string,
 	id uint64,
 	storage storage.Part,
 ) *muxerPart {
@@ -46,6 +48,7 @@ func newMuxerPart(
 		audioTrackTimeScale: audioTrackTimeScale,
 		id:                  id,
 		storage:             storage,
+		name:                partName(prefix, id),
 	}
 
 	if videoTrack == nil {
@@ -55,8 +58,8 @@ func newMuxerPart(
 	return p
 }
 
-func (p *muxerPart) name() string {
-	return fmp4PartName(p.id)
+func (p *muxerPart) getName() string {
+	return p.name
 }
 
 func (p *muxerPart) reader() (io.ReadCloser, error) {
@@ -75,7 +78,6 @@ func (p *muxerPart) finalize(nextDTS time.Duration) error {
 			ID:       1,
 			BaseTime: durationGoToMp4(p.videoStartDTS, 90000),
 			Samples:  p.videoSamples,
-			IsVideo:  true,
 		})
 	}
 
@@ -100,7 +102,7 @@ func (p *muxerPart) finalize(nextDTS time.Duration) error {
 	return nil
 }
 
-func (p *muxerPart) writeH264(sample *augmentedVideoSample) {
+func (p *muxerPart) writeVideo(sample *augmentedVideoSample) {
 	if !p.videoStartDTSFilled {
 		p.videoStartDTSFilled = true
 		p.videoStartDTS = sample.dts

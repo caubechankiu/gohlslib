@@ -3,7 +3,6 @@ package gohlslib
 import (
 	"fmt"
 	"io"
-	"strconv"
 	"time"
 
 	"github.com/bluenviron/gohlslib/pkg/storage"
@@ -18,8 +17,9 @@ type muxerSegmentFMP4 struct {
 	videoTrack          *Track
 	audioTrack          *Track
 	audioTrackTimeScale uint32
+	prefix              string
 	genPartID           func() uint64
-	onPartFinalized     func(*muxerPart)
+	publishPart         func(*muxerPart)
 
 	name        string
 	storage     storage.File
@@ -38,9 +38,10 @@ func newMuxerSegmentFMP4(
 	videoTrack *Track,
 	audioTrack *Track,
 	audioTrackTimeScale uint32,
+	prefix string,
 	factory storage.Factory,
 	genPartID func() uint64,
-	onPartFinalized func(*muxerPart),
+	publishPart func(*muxerPart),
 ) (*muxerSegmentFMP4, error) {
 	s := &muxerSegmentFMP4{
 		lowLatency:          lowLatency,
@@ -51,13 +52,14 @@ func newMuxerSegmentFMP4(
 		videoTrack:          videoTrack,
 		audioTrack:          audioTrack,
 		audioTrackTimeScale: audioTrackTimeScale,
+		prefix:              prefix,
 		genPartID:           genPartID,
-		onPartFinalized:     onPartFinalized,
-		name:                "seg" + strconv.FormatUint(id, 10),
+		publishPart:         publishPart,
+		name:                segmentName(prefix, id, true),
 	}
 
 	var err error
-	s.storage, err = factory.NewFile(s.name + ".mp4")
+	s.storage, err = factory.NewFile(s.name)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +69,7 @@ func newMuxerSegmentFMP4(
 		s.videoTrack,
 		s.audioTrack,
 		s.audioTrackTimeScale,
+		prefix,
 		s.genPartID(),
 		s.storage.NewPart(),
 	)
@@ -101,7 +104,7 @@ func (s *muxerSegmentFMP4) finalize(nextDTS time.Duration) error {
 			return err
 		}
 
-		s.onPartFinalized(s.currentPart)
+		s.publishPart(s.currentPart)
 		s.parts = append(s.parts, s.currentPart)
 	}
 	s.currentPart = nil
@@ -113,7 +116,7 @@ func (s *muxerSegmentFMP4) finalize(nextDTS time.Duration) error {
 	return nil
 }
 
-func (s *muxerSegmentFMP4) writeH264(
+func (s *muxerSegmentFMP4) writeVideo(
 	sample *augmentedVideoSample,
 	nextDTS time.Duration,
 	adjustedPartDuration time.Duration,
@@ -124,7 +127,7 @@ func (s *muxerSegmentFMP4) writeH264(
 	}
 	s.size += size
 
-	s.currentPart.writeH264(sample)
+	s.currentPart.writeVideo(sample)
 
 	// switch part
 	if s.lowLatency &&
@@ -135,13 +138,14 @@ func (s *muxerSegmentFMP4) writeH264(
 		}
 
 		s.parts = append(s.parts, s.currentPart)
-		s.onPartFinalized(s.currentPart)
+		s.publishPart(s.currentPart)
 
 		s.currentPart = newMuxerPart(
 			nextDTS,
 			s.videoTrack,
 			s.audioTrack,
 			s.audioTrackTimeScale,
+			s.prefix,
 			s.genPartID(),
 			s.storage.NewPart(),
 		)
@@ -172,13 +176,14 @@ func (s *muxerSegmentFMP4) writeAudio(
 		}
 
 		s.parts = append(s.parts, s.currentPart)
-		s.onPartFinalized(s.currentPart)
+		s.publishPart(s.currentPart)
 
 		s.currentPart = newMuxerPart(
 			nextAudioSampleDTS,
 			s.videoTrack,
 			s.audioTrack,
 			s.audioTrackTimeScale,
+			s.prefix,
 			s.genPartID(),
 			s.storage.NewPart(),
 		)
