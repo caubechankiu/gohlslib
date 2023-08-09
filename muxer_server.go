@@ -272,7 +272,7 @@ func (s *muxerServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	case (s.variant != MuxerVariantMPEGTS && strings.HasSuffix(name, ".mp4")) ||
 		(s.variant == MuxerVariantMPEGTS && strings.HasSuffix(name, ".ts")):
-		s.handleSegmentOrPart(name, w)
+		s.handleSegmentOrPart(name, w, r)
 	}
 }
 
@@ -623,7 +623,7 @@ func (s *muxerServer) handleInitFile(w http.ResponseWriter) {
 	io.Copy(w, r)
 }
 
-func (s *muxerServer) handleSegmentOrPart(fname string, w http.ResponseWriter) {
+func (s *muxerServer) handleSegmentOrPart(fname string, w http.ResponseWriter, req *http.Request) {
 	switch {
 	case strings.HasPrefix(fname, s.prefix+"_"+"seg"):
 		s.mutex.Lock()
@@ -642,6 +642,8 @@ func (s *muxerServer) handleSegmentOrPart(fname string, w http.ResponseWriter) {
 		defer r.Close()
 
 		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("Content-Length", strconv.FormatUint(segment.getSize(), 10))
+		w.Header().Set("X-Fastboto-Duration", strconv.FormatInt(segment.getDuration().Milliseconds(), 10))
 
 		w.Header().Set(
 			"Content-Type",
@@ -654,7 +656,9 @@ func (s *muxerServer) handleSegmentOrPart(fname string, w http.ResponseWriter) {
 		)
 
 		w.WriteHeader(http.StatusOK)
-		io.Copy(w, r)
+		if req.Method == http.MethodGet {
+			io.Copy(w, r)
+		}
 
 	case s.variant == MuxerVariantLowLatency && strings.HasPrefix(fname, s.prefix+"_"+"part"):
 		s.mutex.Lock()
